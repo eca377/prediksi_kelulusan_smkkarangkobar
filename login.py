@@ -109,7 +109,7 @@ def login_page():
         st.markdown("<p style='color:white'>SMK Ma'arif NU 01 Karangkobar</p>", unsafe_allow_html=True)
 
     with col2:
-        st.markdown("<div class='login-title'>🔑 Login Sistem</div>", unsafe_allow_html=True)
+        st.markdown("<div class='login-title'>🔑 Login </div>", unsafe_allow_html=True)
 
         with st.form("login_form", clear_on_submit=False):
             username = st.text_input("👤 Username")
