@@ -1,0 +1,5 @@
+import pickle
+
+model = {"info": "Dummy model prediksi kelulusan"}
+with open("data/model.pkl", "wb") as f:
+    pickle.dump(model, f)
