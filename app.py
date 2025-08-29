@@ -1,3 +1,4 @@
+# app.py
 import streamlit as st
 from views import dashboard, data_siswa, data_guru, rapor, statistik, prediksi
 import pandas as pd
@@ -8,7 +9,7 @@ from login import show as login_show, logout
 DB_FILE = "database.db"
 
 # =========================
-# Dataset Util
+# Util dataset
 # =========================
 def normalize_dataset(df: pd.DataFrame) -> pd.DataFrame:
     df.columns = [c.strip().title() for c in df.columns]
@@ -26,25 +27,24 @@ def save_dataset_to_db(df: pd.DataFrame):
     conn.close()
 
 def load_dataset_from_db():
-    if "dataset" in st.session_state:
-        return st.session_state["dataset"]
     try:
         conn = sqlite3.connect(DB_FILE)
         df = pd.read_sql("SELECT * FROM siswa", conn)
         conn.close()
-        st.session_state["dataset"] = df
         return df
     except Exception:
         return None
 
 # =========================
-# Sidebar
+# Sidebar untuk Admin/Guru
 # =========================
-def sidebar_menu():
+def sidebar_menu_admin():
     with st.sidebar:
         st.markdown("### 📂 Dataset")
-
         uploaded_file = st.file_uploader("Upload file CSV/XLSX", type=["csv","xls","xlsx"])
+
+        if uploaded_file is None and "dataset" in st.session_state:
+            del st.session_state["dataset"]
 
         if uploaded_file is not None:
             try:
@@ -57,21 +57,25 @@ def sidebar_menu():
                 st.error(f"❌ Gagal memproses file: {e}")
         else:
             if "dataset" not in st.session_state:
-                load_dataset_from_db()
+                db_df = load_dataset_from_db()
+                if db_df is not None:
+                    st.session_state["dataset"] = db_df
             if "dataset" not in st.session_state:
                 st.info("Belum ada file diunggah.")
 
         st.markdown("---")
-
         menu = [
-            "🏠 Dashboard",
-            "👨‍🎓 Data Siswa",
-            "👨‍🏫 Data Guru",
-            "📑 Rapor",
-            "📊 Statistik",
-            "🤖 Prediksi Kelulusan",
-            "🚪 Logout",
+            "🏠 Dashboard","👨‍🎓 Data Siswa","👨‍🏫 Data Guru",
+            "📑 Rapor","📊 Statistik","🤖 Prediksi Kelulusan","🚪 Logout"
         ]
+        return st.radio("Navigasi", menu, label_visibility="collapsed")
+
+# =========================
+# Sidebar untuk Siswa
+# =========================
+def sidebar_menu_siswa():
+    with st.sidebar:
+        menu = ["🤖 Prediksi Kelulusan","🚪 Logout"]
         return st.radio("Navigasi", menu, label_visibility="collapsed")
 
 # =========================
@@ -84,33 +88,48 @@ def main():
         login_show()
         return
 
-    choice = sidebar_menu()
+    role = st.session_state.get("role", "")
 
-    # Auto redirect ke Dashboard setelah login
-    if st.session_state.get("redirect_dashboard", False):
-        st.session_state["redirect_dashboard"] = False
-        choice = "🏠 Dashboard"
+    if role == "Siswa":
+        choice = sidebar_menu_siswa()
+        if choice == "🤖 Prediksi Kelulusan":
+            df = load_dataset_from_db()
+            if df is not None:
+                st.session_state["dataset"] = df
+                nama = st.session_state.get("nama")
+                nis = st.session_state.get("nis")
+                df_siswa = df[(df["Nama"] == nama) & (df["NIS"] == nis)]
+                if not df_siswa.empty:
+                    st.subheader("📊 Nilai & Hasil Prediksi Anda")
+                    st.dataframe(df_siswa, use_container_width=True)
+                else:
+                    st.error("❌ Nama / NIS tidak terdaftar!")
+            else:
+                st.warning("⚠️ Dataset belum tersedia, silakan hubungi Admin/Guru.")
+        elif choice == "🚪 Logout":
+            if "dataset" in st.session_state: del st.session_state["dataset"]
+            logout()
 
-    # Navigasi
-    if choice == "🏠 Dashboard":
-        dashboard.show()
-    elif choice == "👨‍🎓 Data Siswa":
-        data_siswa.show()
-    elif choice == "👨‍🏫 Data Guru":
-        data_guru.show()
-    elif choice == "📑 Rapor":
-        rapor.show()
-    elif choice == "📊 Statistik":
-        statistik.show()
-    elif choice == "🤖 Prediksi Kelulusan":
-        if "dataset" in st.session_state:
-            prediksi.show()
-        else:
-            st.warning("⚠️ Dataset belum tersedia.")
-    elif choice == "🚪 Logout":
-        if "dataset" in st.session_state:
-            del st.session_state["dataset"]
-        logout()
+    else:  # Admin / Guru
+        choice = sidebar_menu_admin()
+        if choice == "🏠 Dashboard":
+            dashboard.show()
+        elif choice == "👨‍🎓 Data Siswa":
+            data_siswa.show()
+        elif choice == "👨‍🏫 Data Guru":
+            data_guru.show()
+        elif choice == "📑 Rapor":
+            rapor.show()
+        elif choice == "📊 Statistik":
+            statistik.show()
+        elif choice == "🤖 Prediksi Kelulusan":
+            if "dataset" in st.session_state:
+                prediksi.show()
+            else:
+                st.warning("⚠️ Dataset belum tersedia, silakan unggah terlebih dahulu.")
+        elif choice == "🚪 Logout":
+            if "dataset" in st.session_state: del st.session_state["dataset"]
+            logout()
 
 if __name__ == "__main__":
     main()
