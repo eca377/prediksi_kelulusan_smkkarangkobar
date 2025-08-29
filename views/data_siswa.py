@@ -1,7 +1,7 @@
-# views/data_siswa.py — CRUD Data Siswa
+# login.py — Modul Login (Admin + Siswa)
 import streamlit as st
 import sqlite3
-import pandas as pd
+import base64
 
 DB_PATH = "data.db"
 
@@ -11,96 +11,169 @@ DB_PATH = "data.db"
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
+
+    # Table users (Admin)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE,
+            password TEXT,
+            role TEXT CHECK(role IN ('Admin'))
+        )
+    """)
+    # Table siswa (untuk login siswa)
     c.execute("""
         CREATE TABLE IF NOT EXISTS siswa (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nis TEXT UNIQUE,
             nama TEXT,
+            nis TEXT,
             kelas TEXT
         )
     """)
+    # Table hasil prediksi
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS hasil_prediksi (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nama TEXT,
+            nis TEXT,
+            kelas TEXT,
+            status TEXT
+        )
+    """)
+
+    # Seed admin default
+    c.execute("SELECT * FROM users WHERE username='admin'")
+    if not c.fetchone():
+        c.execute(
+            "INSERT INTO users (username,password,role) VALUES (?,?,?)",
+            ("admin", "admin123", "Admin")
+        )
     conn.commit()
     conn.close()
-
-def get_all_siswa():
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT * FROM siswa", conn)
-    conn.close()
-    return df
-
-def add_siswa(nis, nama, kelas):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    try:
-        c.execute("INSERT INTO siswa (nis, nama, kelas) VALUES (?,?,?)", (nis, nama, kelas))
-        conn.commit()
-        st.success(f"✅ Siswa {nama} ({nis}) berhasil ditambahkan")
-    except sqlite3.IntegrityError:
-        st.error("❌ NIS sudah ada!")
-    conn.close()
-
-def update_siswa(id, nis, nama, kelas):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("UPDATE siswa SET nis=?, nama=?, kelas=? WHERE id=?", (nis, nama, kelas, id))
-    conn.commit()
-    conn.close()
-    st.success("✅ Data siswa berhasil diperbarui")
-
-def delete_siswa(id):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("DELETE FROM siswa WHERE id=?", (id,))
-    conn.commit()
-    conn.close()
-    st.success("✅ Data siswa berhasil dihapus")
 
 # =========================
-# Halaman
+# Auth Check
+# =========================
+def check_login(username, password):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Cek Admin
+    c.execute("SELECT role FROM users WHERE username=? AND password=?", (username, password))
+    result = c.fetchone()
+    if result and result[0] == "Admin":
+        conn.close()
+        return {"role": "Admin", "username": username}
+
+    # Cek Siswa (username = nama, password = nis)
+    c.execute("SELECT * FROM siswa WHERE nama=? AND nis=?", (username, password))
+    siswa = c.fetchone()
+    conn.close()
+    if siswa:
+        return {"role": "Siswa", "username": username, "nis": password}
+    
+    return None
+
+# =========================
+# Background
+# =========================
+def set_bg(image_file="assets/img/bg8.jpg"):
+    try:
+        with open(image_file, "rb") as f:
+            data = f.read()
+        b64 = base64.b64encode(data).decode()
+        st.markdown(
+            f"""
+            <style>
+            .stApp {{
+                background: url("data:image/png;base64,{b64}") no-repeat center center fixed;
+                background-size: cover;
+            }}
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
+    except FileNotFoundError:
+        pass
+
+# =========================
+# Halaman Login
+# =========================
+def login_page():
+    init_db()
+    set_bg()
+    logo_path = "assets/img/logo.png"
+
+    st.markdown("""
+    <style>
+    .login-box {
+        background: rgba(255,255,255,0.9);
+        border-radius: 16px;
+        padding: 30px;
+        width: 330px;
+        margin: auto;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    }
+    .login-title {
+        font-size: 22px;
+        font-weight: bold;
+        margin-bottom: 15px;
+        text-align: center;
+    }
+    .stButton>button {
+        width: 100% !important;
+        border-radius: 8px;
+        padding: 10px;
+        background: linear-gradient(135deg,#1f1f1f,#3a3a3a);
+        color: white;
+        border: none;
+    }
+    .stButton>button:hover {
+        background: linear-gradient(135deg,#52b87d,#3bb371);
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    col1, col2 = st.columns([1,1])
+    with col1:
+        st.image(logo_path, width=160)
+        st.markdown("<h3 style='color:white'>Sistem Prediksi Kelulusan Siswa</h3>", unsafe_allow_html=True)
+        st.markdown("<p style='color:white'>SMK Ma'arif NU 01 Karangkobar</p>", unsafe_allow_html=True)
+
+    with col2:
+        st.markdown("<div class='login-title'>🔑 Login </div>", unsafe_allow_html=True)
+
+        with st.form("login_form", clear_on_submit=False):
+            username = st.text_input("👤 Nama / Username")
+            password = st.text_input("🔒 Password / NIS", type="password")
+            submitted = st.form_submit_button("Masuk")
+
+            if submitted:
+                user = check_login(username, password)
+                if user:
+                    st.session_state.logged_in = True
+                    st.session_state.role = user["role"]
+                    st.session_state.username = user["username"]
+                    if user["role"] == "Siswa":
+                        st.session_state.nis = user["nis"]
+                    st.success(f"✅ Login berhasil sebagai {user['role']}!")
+                    st.rerun()
+                else:
+                    st.error("❌ Nama / NIS tidak terdaftar!")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+# =========================
+# Ekspor fungsi
 # =========================
 def show():
-    st.title("📚 Manajemen Data Siswa")
-    init_db()
+    login_page()
 
-    menu = st.radio("Menu", ["➕ Tambah", "📋 Lihat / Edit / Hapus"], horizontal=True)
-
-    if menu == "➕ Tambah":
-        with st.form("add_siswa_form", clear_on_submit=True):
-            nis = st.text_input("NIS")
-            nama = st.text_input("Nama Siswa")
-            kelas = st.text_input("Kelas")
-            submitted = st.form_submit_button("Tambah")
-            if submitted and nis and nama:
-                add_siswa(nis, nama, kelas)
-
-        # 🔥 langsung tampilkan data setelah input
-        df = get_all_siswa()
-        if not df.empty:
-            st.subheader("📋 Data Siswa Saat Ini")
-            st.dataframe(df, use_container_width=True)
-
-    elif menu == "📋 Lihat / Edit / Hapus":
-        df = get_all_siswa()
-        if df.empty:
-            st.info("Belum ada data siswa")
-        else:
-            st.dataframe(df, use_container_width=True)
-
-            # Pilih siswa untuk edit / hapus
-            siswa_id = st.selectbox("Pilih ID Siswa", df["id"])
-            siswa_row = df[df["id"] == siswa_id].iloc[0]
-
-            with st.form("edit_siswa_form"):
-                nis = st.text_input("NIS", siswa_row["nis"])
-                nama = st.text_input("Nama", siswa_row["nama"])
-                kelas = st.text_input("Kelas", siswa_row["kelas"])
-                col1, col2 = st.columns(2)
-                with col1:
-                    update_btn = st.form_submit_button("💾 Update")
-                with col2:
-                    delete_btn = st.form_submit_button("🗑️ Hapus")
-
-                if update_btn:
-                    update_siswa(siswa_id, nis, nama, kelas)
-                if delete_btn:
-                    delete_siswa(siswa_id)
+def logout():
+    st.session_state.logged_in = False
+    st.session_state.username = None
+    st.session_state.role = None
+    if "nis" in st.session_state:
+        del st.session_state["nis"]
+    st.success("✅ Logout berhasil")
+    st.rerun()
