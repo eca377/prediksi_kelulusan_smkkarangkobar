@@ -1,8 +1,9 @@
-# login.py — Modul Login (Admin + Siswa)
+# login.py
 import os
 import sqlite3
 import base64
 import streamlit as st
+import views.prediksi as prediksi   # 🔑 langsung import prediksi.py
 
 DB_PATH = "data.db"
 
@@ -22,6 +23,7 @@ def init_db():
             role TEXT CHECK(role IN ('Admin'))
         )
     """)
+
     # Table siswa (untuk login siswa)
     c.execute("""
         CREATE TABLE IF NOT EXISTS siswa (
@@ -31,6 +33,7 @@ def init_db():
             kelas TEXT
         )
     """)
+
     # Table hasil prediksi
     c.execute("""
         CREATE TABLE IF NOT EXISTS hasil_prediksi (
@@ -55,24 +58,24 @@ def init_db():
 # =========================
 # Auth Check
 # =========================
-def check_login(username, password):
+def check_login_admin(username, password):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-
-    # Cek Admin
     c.execute("SELECT role FROM users WHERE username=? AND password=?", (username, password))
     result = c.fetchone()
+    conn.close()
     if result and result[0] == "Admin":
-        conn.close()
         return {"role": "Admin", "username": username}
+    return None
 
-    # Cek Siswa (username = nama, password = nis)
-    c.execute("SELECT * FROM siswa WHERE nama=? AND nis=?", (username, password))
+def check_login_siswa(nama, nis):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT * FROM siswa WHERE nama=? AND nis=?", (nama, nis))
     siswa = c.fetchone()
     conn.close()
     if siswa:
-        return {"role": "Siswa", "username": username, "nis": password}
-    
+        return {"role": "Siswa", "username": nama, "nis": nis, "kelas": siswa[3]}
     return None
 
 # =========================
@@ -82,23 +85,24 @@ def set_bg(image_file="assets/img/bg8.jpg"):
     try:
         BASE_DIR = os.path.dirname(__file__)
         image_file = os.path.join(BASE_DIR, image_file)
-        with open(image_file, "rb") as f:
-            data = f.read()
-        b64 = base64.b64encode(data).decode()
-        ext = os.path.splitext(image_file)[1][1:]
-        st.markdown(
-            f"""
-            <style>
-            .stApp {{
-                background: url("data:image/{ext};base64,{b64}") no-repeat center center fixed;
-                background-size: cover;
-            }}
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
-    except FileNotFoundError:
-        st.warning("⚠️ Background tidak ditemukan")
+        if os.path.exists(image_file):
+            with open(image_file, "rb") as f:
+                data = f.read()
+            b64 = base64.b64encode(data).decode()
+            ext = os.path.splitext(image_file)[1][1:]
+            st.markdown(
+                f"""
+                <style>
+                .stApp {{
+                    background: url("data:image/{ext};base64,{b64}") no-repeat center center fixed;
+                    background-size: cover;
+                }}
+                </style>
+                """,
+                unsafe_allow_html=True
+            )
+    except Exception as e:
+        st.warning(f"⚠️ Background tidak dimuat: {e}")
 
 # =========================
 # Halaman Login
@@ -108,6 +112,7 @@ def login_page():
     set_bg()
     logo_path = os.path.join(os.path.dirname(__file__), "assets", "img", "logo.png")
 
+    # Custom style
     st.markdown("""
     <style>
     .login-box {
@@ -148,27 +153,56 @@ def login_page():
         st.markdown("<p style='color:white'>SMK Ma'arif NU 01 Karangkobar</p>", unsafe_allow_html=True)
 
     with col2:
-        st.markdown("<div class='login-title'>🔑 Login </div>", unsafe_allow_html=True)
+        st.markdown("<div class='login-title'>🔑 Pilih Login</div>", unsafe_allow_html=True)
 
-        with st.form("login_form", clear_on_submit=False):
-            username = st.text_input("👤 Nama / Username")
-            password = st.text_input("🔒 Password / NIS", type="password")
-            submitted = st.form_submit_button("Masuk")
+        role_tabs = st.tabs(["👨‍💼 Admin", "🎓 Siswa"])
 
-            if submitted:
-                user = check_login(username, password)
-                if user:
-                    st.session_state.logged_in = True
-                    st.session_state.role = user["role"]
-                    st.session_state.username = user["username"]
-                    if user["role"] == "Siswa":
+        # === Login Admin ===
+        with role_tabs[0]:
+            st.info("Masuk sebagai **Admin** dengan Username & Password.")
+            with st.form("admin_login_form", clear_on_submit=False):
+                username = st.text_input("👤 Username")
+                password = st.text_input("🔒 Password", type="password")
+                submitted = st.form_submit_button("Masuk sebagai Admin")
+
+                if submitted:
+                    user = check_login_admin(username, password)
+                    if user:
+                        st.session_state.logged_in = True
+                        st.session_state.role = user["role"]
+                        st.session_state.username = user["username"]
+                        st.success("✅ Login Admin berhasil!")
+                        st.rerun()
+                    else:
+                        st.error("❌ Username / Password salah!")
+
+        # === Login Siswa ===
+        with role_tabs[1]:
+            st.info("Masuk sebagai **Siswa** menggunakan Nama & NIS.")
+            with st.form("siswa_login_form", clear_on_submit=False):
+                nama = st.text_input("👤 Nama Lengkap")
+                nis = st.text_input("🆔 NIS")
+                submitted = st.form_submit_button("Masuk sebagai Siswa")
+
+                if submitted:
+                    user = check_login_siswa(nama, nis)
+                    if user:
+                        st.session_state.logged_in = True
+                        st.session_state.role = user["role"]
+                        st.session_state.username = user["username"]
                         st.session_state.nis = user["nis"]
-                    st.success(f"✅ Login berhasil sebagai {user['role']}!")
-                    st.rerun()
-                else:
-                    st.error("❌ Nama / NIS tidak terdaftar!")
+                        st.session_state.kelas = user["kelas"]
+                        st.success("✅ Login Siswa berhasil! Menampilkan hasil prediksi...")
+                        st.session_state.show_prediksi = True
+                        st.rerun()
+                    else:
+                        st.error("❌ Nama / NIS tidak ditemukan!")
 
         st.markdown("</div>", unsafe_allow_html=True)
+
+    # Jika siswa login → langsung tampilkan prediksi
+    if st.session_state.get("show_prediksi") and st.session_state.role == "Siswa":
+        prediksi.show()
 
 # =========================
 # Ekspor fungsi
@@ -182,5 +216,9 @@ def logout():
     st.session_state.role = None
     if "nis" in st.session_state:
         del st.session_state["nis"]
+    if "kelas" in st.session_state:
+        del st.session_state["kelas"]
+    if "show_prediksi" in st.session_state:
+        del st.session_state["show_prediksi"]
     st.success("✅ Logout berhasil")
     st.rerun()
