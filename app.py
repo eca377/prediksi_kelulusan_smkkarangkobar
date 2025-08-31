@@ -1,4 +1,4 @@
-# app.py
+# app.py — Final (Login Admin/Guru & Siswa)
 import streamlit as st
 from views import dashboard, data_siswa, data_guru, rapor, statistik, prediksi
 import pandas as pd
@@ -40,6 +40,7 @@ def load_dataset_from_db():
 # =========================
 def sidebar_menu_admin():
     with st.sidebar:
+        st.image("assets/img/logo.png", use_container_width=True)
         st.markdown("### 📂 Dataset")
         uploaded_file = st.file_uploader("Upload file CSV/XLSX", type=["csv","xls","xlsx"])
 
@@ -75,6 +76,7 @@ def sidebar_menu_admin():
 # =========================
 def sidebar_menu_siswa():
     with st.sidebar:
+        st.image("assets/img/logo.png", use_container_width=True)
         menu = ["🤖 Prediksi Kelulusan","🚪 Logout"]
         return st.radio("Navigasi", menu, label_visibility="collapsed")
 
@@ -90,6 +92,7 @@ def main():
 
     role = st.session_state.get("role", "")
 
+    # ================= Siswa =================
     if role == "Siswa":
         choice = sidebar_menu_siswa()
         if choice == "🤖 Prediksi Kelulusan":
@@ -110,7 +113,8 @@ def main():
             if "dataset" in st.session_state: del st.session_state["dataset"]
             logout()
 
-    else:  # Admin / Guru
+    # ================= Admin / Guru =================
+    else:
         choice = sidebar_menu_admin()
         if choice == "🏠 Dashboard":
             dashboard.show()
