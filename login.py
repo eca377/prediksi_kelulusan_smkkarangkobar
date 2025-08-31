@@ -69,13 +69,29 @@ def check_login_admin(username, password):
     return None
 
 def check_login_siswa(nama, nis):
+    """
+    Cek login siswa langsung ke tabel siswa,
+    kalau kosong fallback ke dataset yang diupload
+    """
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT * FROM siswa WHERE nama=? AND nis=?", (nama, nis))
     siswa = c.fetchone()
     conn.close()
+
     if siswa:
         return {"role": "Siswa", "username": nama, "nis": nis, "kelas": siswa[3]}
+
+    # fallback dataset
+    if "dataset" in st.session_state:
+        df = st.session_state["dataset"]
+        df_match = df[
+            (df["Nama"].str.strip().str.upper() == str(nama).strip().upper()) &
+            (df["NIS"].astype(str).str.strip() == str(nis).strip())
+        ]
+        if not df_match.empty:
+            row = df_match.iloc[0]
+            return {"role": "Siswa", "username": row["Nama"], "nis": str(row["NIS"]), "kelas": row.get("Kelas", "")}
     return None
 
 # =========================
@@ -202,7 +218,11 @@ def login_page():
 
     # Jika siswa login → langsung tampilkan prediksi
     if st.session_state.get("show_prediksi") and st.session_state.role == "Siswa":
-        prediksi.show()
+        prediksi.show(
+            role="siswa",
+            nis=st.session_state.get("nis"),
+            nama=st.session_state.get("username")
+        )
 
 # =========================
 # Ekspor fungsi
