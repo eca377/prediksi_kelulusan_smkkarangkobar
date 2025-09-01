@@ -1,24 +1,37 @@
-# app.py — Final (Login Admin/Guru & Siswa)
+# app.py — Final + Auto Backup Dataset Lama + Fix Login Siswa + Full Data Siswa
 import streamlit as st
 from views import dashboard, data_siswa, data_guru, rapor, statistik, prediksi
 import pandas as pd
 import sqlite3
+import os
+from datetime import datetime
 
 from login import show as login_show, logout
 
 DB_FILE = "database.db"
+BACKUP_DIR = "backup"
 
 # =========================
 # Util dataset
 # =========================
 def normalize_dataset(df: pd.DataFrame) -> pd.DataFrame:
+    """Samakan nama kolom supaya konsisten"""
     df.columns = [c.strip().title() for c in df.columns]
-    if "Nis" in df.columns: df = df.rename(columns={"Nis": "NIS"})
-    if "Nama Siswa" in df.columns: df = df.rename(columns={"Nama Siswa": "Nama"})
-    if "Mtk" in df.columns: df = df.rename(columns={"Mtk": "MTK"})
-    if "B.Indonesia" in df.columns: df = df.rename(columns={"B.Indonesia": "Indo"})
-    if "B.Inggris" in df.columns: df = df.rename(columns={"B.Inggris": "Inggris"})
-    if "Ppkn" in df.columns: df = df.rename(columns={"Ppkn": "PPKN"})
+
+    if "Nis" in df.columns:
+        df = df.rename(columns={"Nis": "NIS"})
+    if "Nisn" in df.columns:
+        df = df.rename(columns={"Nisn": "NISN"})
+    if "Nama Siswa" in df.columns and "Nama" not in df.columns:
+        df = df.rename(columns={"Nama Siswa": "Nama"})
+    if "Mtk" in df.columns:
+        df = df.rename(columns={"Mtk": "MTK"})
+    if "B.Indonesia" in df.columns:
+        df = df.rename(columns={"B.Indonesia": "Indo"})
+    if "B.Inggris" in df.columns:
+        df = df.rename(columns={"B.Inggris": "Inggris"})
+    if "Ppkn" in df.columns:
+        df = df.rename(columns={"Ppkn": "PPKN"})
     return df
 
 def save_dataset_to_db(df: pd.DataFrame):
@@ -35,6 +48,16 @@ def load_dataset_from_db():
     except Exception:
         return None
 
+def backup_dataset():
+    """Backup dataset lama sebelum diganti"""
+    df_old = load_dataset_from_db()
+    if df_old is not None:
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_file = os.path.join(BACKUP_DIR, f"siswa_backup_{timestamp}.csv")
+        df_old.to_csv(backup_file, index=False)
+        st.info(f"📦 Dataset lama di-backup: {backup_file}")
+
 # =========================
 # Sidebar untuk Admin/Guru
 # =========================
@@ -44,19 +67,27 @@ def sidebar_menu_admin():
         st.markdown("### 📂 Dataset")
         uploaded_file = st.file_uploader("Upload file CSV/XLSX", type=["csv","xls","xlsx"])
 
+        # Hapus dataset lama saat tidak ada file
         if uploaded_file is None and "dataset" in st.session_state:
             del st.session_state["dataset"]
 
+        # Proses upload file
         if uploaded_file is not None:
             try:
                 raw = pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv") else pd.read_excel(uploaded_file)
                 df = normalize_dataset(raw)
+
+                # Backup dataset lama
+                backup_dataset()
+
+                # Simpan dataset baru
                 st.session_state["dataset"] = df.copy()
                 save_dataset_to_db(df)
-                st.success("✅ Dataset berhasil diunggah")
+                st.success("✅ Dataset berhasil diunggah dan tersimpan ke DB")
             except Exception as e:
                 st.error(f"❌ Gagal memproses file: {e}")
         else:
+            # Load dataset dari DB jika session_state belum ada
             if "dataset" not in st.session_state:
                 db_df = load_dataset_from_db()
                 if db_df is not None:
@@ -99,12 +130,24 @@ def main():
             df = load_dataset_from_db()
             if df is not None:
                 st.session_state["dataset"] = df
-                nama = st.session_state.get("nama")
-                nis = st.session_state.get("nis")
-                df_siswa = df[(df["Nama"] == nama) & (df["NIS"] == nis)]
+                nama = st.session_state.get("nama", "").strip()
+                nis = str(st.session_state.get("nis", "")).strip()
+
+                # Pastikan Nama & NIS cocok (case-insensitive)
+                df_siswa = df[
+                    (df["Nama"].astype(str).str.strip().str.lower() == nama.lower()) &
+                    (df["NIS"].astype(str).str.strip() == nis)
+                ]
+
                 if not df_siswa.empty:
                     st.subheader("📊 Nilai & Hasil Prediksi Anda")
                     st.dataframe(df_siswa, use_container_width=True)
+
+                    # Tampilkan juga hasil prediksi model
+                    try:
+                        prediksi.show_siswa(df_siswa)
+                    except:
+                        st.warning("⚠️ Modul prediksi belum siap.")
                 else:
                     st.error("❌ Nama / NIS tidak terdaftar!")
             else:
@@ -119,6 +162,7 @@ def main():
         if choice == "🏠 Dashboard":
             dashboard.show()
         elif choice == "👨‍🎓 Data Siswa":
+            # 🔥 Panggil CRUD siswa
             data_siswa.show()
         elif choice == "👨‍🏫 Data Guru":
             data_guru.show()
