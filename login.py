@@ -1,11 +1,12 @@
-# login.py
 import os
 import sqlite3
 import base64
 import streamlit as st
-import views.prediksi as prediksi   # 🔑 langsung import prediksi.py
+import pandas as pd
+import views.prediksi as prediksi
 
 DB_PATH = "data.db"
+DATASET_PATH = os.path.join("data", "dataset.xlsx")
 
 # =========================
 # DB Setup
@@ -13,8 +14,6 @@ DB_PATH = "data.db"
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-
-    # Table users (Admin)
     c.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -23,35 +22,11 @@ def init_db():
             role TEXT CHECK(role IN ('Admin'))
         )
     """)
-
-    # Table siswa (untuk login siswa)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS siswa (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nama TEXT,
-            nis TEXT,
-            kelas TEXT
-        )
-    """)
-
-    # Table hasil prediksi
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS hasil_prediksi (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nama TEXT,
-            nis TEXT,
-            kelas TEXT,
-            status TEXT
-        )
-    """)
-
-    # Seed admin default
+    # Tambahkan admin default
     c.execute("SELECT * FROM users WHERE username='admin'")
     if not c.fetchone():
-        c.execute(
-            "INSERT INTO users (username,password,role) VALUES (?,?,?)",
-            ("admin", "admin123", "Admin")
-        )
+        c.execute("INSERT INTO users (username,password,role) VALUES (?,?,?)",
+                  ("admin", "admin123", "Admin"))
     conn.commit()
     conn.close()
 
@@ -66,32 +41,6 @@ def check_login_admin(username, password):
     conn.close()
     if result and result[0] == "Admin":
         return {"role": "Admin", "username": username}
-    return None
-
-def check_login_siswa(nama, nis):
-    """
-    Cek login siswa langsung ke tabel siswa,
-    kalau kosong fallback ke dataset yang diupload
-    """
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT * FROM siswa WHERE nama=? AND nis=?", (nama, nis))
-    siswa = c.fetchone()
-    conn.close()
-
-    if siswa:
-        return {"role": "Siswa", "username": nama, "nis": nis, "kelas": siswa[3]}
-
-    # fallback dataset
-    if "dataset" in st.session_state:
-        df = st.session_state["dataset"]
-        df_match = df[
-            (df["Nama"].str.strip().str.upper() == str(nama).strip().upper()) &
-            (df["NIS"].astype(str).str.strip() == str(nis).strip())
-        ]
-        if not df_match.empty:
-            row = df_match.iloc[0]
-            return {"role": "Siswa", "username": row["Nama"], "nis": str(row["NIS"]), "kelas": row.get("Kelas", "")}
     return None
 
 # =========================
@@ -114,48 +63,38 @@ def set_bg(image_file="assets/img/bg8.jpg"):
                     background-size: cover;
                 }}
                 </style>
-                """,
-                unsafe_allow_html=True
+                """, unsafe_allow_html=True
             )
     except Exception as e:
         st.warning(f"⚠️ Background tidak dimuat: {e}")
 
 # =========================
-# Halaman Login
+# Halaman Login (Admin only)
 # =========================
 def login_page():
     init_db()
     set_bg()
     logo_path = os.path.join(os.path.dirname(__file__), "assets", "img", "logo.png")
 
+    # Load dataset sekali saja
+    if "dataset" not in st.session_state:
+        try:
+            if os.path.exists(DATASET_PATH):
+                df = pd.read_excel(DATASET_PATH)
+                df.columns = df.columns.str.strip()
+                st.session_state["dataset"] = df
+            else:
+                st.error(f"❌ File {DATASET_PATH} tidak ditemukan!")
+        except Exception as e:
+            st.error(f"❌ Gagal membaca dataset.xlsx: {e}")
+
     # Custom style
     st.markdown("""
     <style>
-    .login-box {
-        background: rgba(255,255,255,0.9);
-        border-radius: 16px;
-        padding: 30px;
-        width: 330px;
-        margin: auto;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.35);
-    }
-    .login-title {
-        font-size: 22px;
-        font-weight: bold;
-        margin-bottom: 15px;
-        text-align: center;
-    }
-    .stButton>button {
-        width: 100% !important;
-        border-radius: 8px;
-        padding: 10px;
-        background: linear-gradient(135deg,#1f1f1f,#3a3a3a);
-        color: white;
-        border: none;
-    }
-    .stButton>button:hover {
-        background: linear-gradient(135deg,#52b87d,#3bb371);
-    }
+    .login-box {background: rgba(255,255,255,0.9); border-radius: 16px; padding: 30px; width: 330px; margin: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.35);}
+    .login-title {font-size: 22px; font-weight: bold; margin-bottom: 15px; text-align: center;}
+    .stButton>button {width: 100% !important; border-radius: 8px; padding: 10px; background: linear-gradient(135deg,#1f1f1f,#3a3a3a); color: white; border: none;}
+    .stButton>button:hover {background: linear-gradient(135deg,#52b87d,#3bb371);}
     </style>
     """, unsafe_allow_html=True)
 
@@ -163,66 +102,29 @@ def login_page():
     with col1:
         if os.path.exists(logo_path):
             st.image(logo_path, width=160)
-        else:
-            st.warning("⚠️ Logo tidak ditemukan")
         st.markdown("<h3 style='color:white'>Sistem Prediksi Kelulusan Siswa</h3>", unsafe_allow_html=True)
         st.markdown("<p style='color:white'>SMK Ma'arif NU 01 Karangkobar</p>", unsafe_allow_html=True)
 
     with col2:
-        st.markdown("<div class='login-title'>🔑 Pilih Login</div>", unsafe_allow_html=True)
+        st.markdown("<div class='login-title'>🔑 Login Admin</div>", unsafe_allow_html=True)
+        with st.form("admin_login_form", clear_on_submit=False):
+            username = st.text_input("👤 Username")
+            password = st.text_input("🔒 Password", type="password")
+            submitted = st.form_submit_button("Masuk sebagai Admin")
+            if submitted:
+                user = check_login_admin(username, password)
+                if user:
+                    st.session_state.logged_in = True
+                    st.session_state.role = user["role"]
+                    st.session_state.username = user["username"]
+                    st.success("✅ Login Admin berhasil!")
+                    st.rerun()
+                else:
+                    st.error("❌ Username / Password salah!")
 
-        role_tabs = st.tabs(["👨‍💼 Admin", "🎓 Siswa"])
-
-        # === Login Admin ===
-        with role_tabs[0]:
-            st.info("Masuk sebagai **Admin** dengan Username & Password.")
-            with st.form("admin_login_form", clear_on_submit=False):
-                username = st.text_input("👤 Username")
-                password = st.text_input("🔒 Password", type="password")
-                submitted = st.form_submit_button("Masuk sebagai Admin")
-
-                if submitted:
-                    user = check_login_admin(username, password)
-                    if user:
-                        st.session_state.logged_in = True
-                        st.session_state.role = user["role"]
-                        st.session_state.username = user["username"]
-                        st.success("✅ Login Admin berhasil!")
-                        st.rerun()
-                    else:
-                        st.error("❌ Username / Password salah!")
-
-        # === Login Siswa ===
-        with role_tabs[1]:
-            st.info("Masuk sebagai **Siswa** menggunakan Nama & NIS.")
-            with st.form("siswa_login_form", clear_on_submit=False):
-                nama = st.text_input("👤 Nama Lengkap")
-                nis = st.text_input("🆔 NIS")
-                submitted = st.form_submit_button("Masuk sebagai Siswa")
-
-                if submitted:
-                    user = check_login_siswa(nama, nis)
-                    if user:
-                        st.session_state.logged_in = True
-                        st.session_state.role = user["role"]
-                        st.session_state.username = user["username"]
-                        st.session_state.nis = user["nis"]
-                        st.session_state.kelas = user["kelas"]
-                        st.success("✅ Login Siswa berhasil! Menampilkan hasil prediksi...")
-                        st.session_state.show_prediksi = True
-                        st.rerun()
-                    else:
-                        st.error("❌ Nama / NIS tidak ditemukan!")
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    # Jika siswa login → langsung tampilkan prediksi
-    if st.session_state.get("show_prediksi") and st.session_state.role == "Siswa":
-        prediksi.show(
-            role="siswa",
-            nis=st.session_state.get("nis"),
-            nama=st.session_state.get("username")
-        )
+    # Jika sudah login admin → tampilkan prediksi admin
+    if st.session_state.get("logged_in") and st.session_state.role == "Admin":
+        prediksi.show()
 
 # =========================
 # Ekspor fungsi
@@ -231,14 +133,8 @@ def show():
     login_page()
 
 def logout():
-    st.session_state.logged_in = False
-    st.session_state.username = None
-    st.session_state.role = None
-    if "nis" in st.session_state:
-        del st.session_state["nis"]
-    if "kelas" in st.session_state:
-        del st.session_state["kelas"]
-    if "show_prediksi" in st.session_state:
-        del st.session_state["show_prediksi"]
+    for key in ["logged_in", "username", "role"]:
+        if key in st.session_state:
+            del st.session_state[key]
     st.success("✅ Logout berhasil")
     st.rerun()
