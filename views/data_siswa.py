@@ -1,179 +1,183 @@
-# login.py — Modul Login (Admin + Siswa)
+# app.py — Final + Auto Backup Dataset Lama + Fix Login Siswa + Full Data Siswa
 import streamlit as st
+from views import dashboard, data_siswa, data_guru, rapor, statistik, prediksi
+import pandas as pd
 import sqlite3
-import base64
+import os
+from datetime import datetime
 
-DB_PATH = "data.db"
+from login import show as login_show, logout
+
+DB_FILE = "database.db"
+BACKUP_DIR = "backup"
 
 # =========================
-# DB Setup
+# Util dataset
 # =========================
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
+def normalize_dataset(df: pd.DataFrame) -> pd.DataFrame:
+    """Samakan nama kolom supaya konsisten"""
+    df.columns = [c.strip().title() for c in df.columns]
 
-    # Table users (Admin)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE,
-            password TEXT,
-            role TEXT CHECK(role IN ('Admin'))
-        )
-    """)
-    # Table siswa (untuk login siswa)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS siswa (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nama TEXT,
-            nis TEXT,
-            kelas TEXT
-        )
-    """)
-    # Table hasil prediksi
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS hasil_prediksi (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nama TEXT,
-            nis TEXT,
-            kelas TEXT,
-            status TEXT
-        )
-    """)
+    if "Nis" in df.columns:
+        df = df.rename(columns={"Nis": "NIS"})
+    if "Nisn" in df.columns:
+        df = df.rename(columns={"Nisn": "NISN"})
+    if "Nama Siswa" in df.columns and "Nama" not in df.columns:
+        df = df.rename(columns={"Nama Siswa": "Nama"})
+    if "Mtk" in df.columns:
+        df = df.rename(columns={"Mtk": "MTK"})
+    if "B.Indonesia" in df.columns:
+        df = df.rename(columns={"B.Indonesia": "Indo"})
+    if "B.Inggris" in df.columns:
+        df = df.rename(columns={"B.Inggris": "Inggris"})
+    if "Ppkn" in df.columns:
+        df = df.rename(columns={"Ppkn": "PPKN"})
+    return df
 
-    # Seed admin default
-    c.execute("SELECT * FROM users WHERE username='admin'")
-    if not c.fetchone():
-        c.execute(
-            "INSERT INTO users (username,password,role) VALUES (?,?,?)",
-            ("admin", "admin123", "Admin")
-        )
-    conn.commit()
+def save_dataset_to_db(df: pd.DataFrame):
+    conn = sqlite3.connect(DB_FILE)
+    df.to_sql("siswa", conn, if_exists="replace", index=False)
     conn.close()
 
-# =========================
-# Auth Check
-# =========================
-def check_login(username, password):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-
-    # Cek Admin
-    c.execute("SELECT role FROM users WHERE username=? AND password=?", (username, password))
-    result = c.fetchone()
-    if result and result[0] == "Admin":
-        conn.close()
-        return {"role": "Admin", "username": username}
-
-    # Cek Siswa (username = nama, password = nis)
-    c.execute("SELECT * FROM siswa WHERE nama=? AND nis=?", (username, password))
-    siswa = c.fetchone()
-    conn.close()
-    if siswa:
-        return {"role": "Siswa", "username": username, "nis": password}
-    
-    return None
-
-# =========================
-# Background
-# =========================
-def set_bg(image_file="assets/img/bg8.jpg"):
+def load_dataset_from_db():
     try:
-        with open(image_file, "rb") as f:
-            data = f.read()
-        b64 = base64.b64encode(data).decode()
-        st.markdown(
-            f"""
-            <style>
-            .stApp {{
-                background: url("data:image/png;base64,{b64}") no-repeat center center fixed;
-                background-size: cover;
-            }}
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
-    except FileNotFoundError:
-        pass
+        conn = sqlite3.connect(DB_FILE)
+        df = pd.read_sql("SELECT * FROM siswa", conn)
+        conn.close()
+        return df
+    except Exception:
+        return None
+
+def backup_dataset():
+    """Backup dataset lama sebelum diganti"""
+    df_old = load_dataset_from_db()
+    if df_old is not None:
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_file = os.path.join(BACKUP_DIR, f"siswa_backup_{timestamp}.csv")
+        df_old.to_csv(backup_file, index=False)
+        st.info(f"📦 Dataset lama di-backup: {backup_file}")
 
 # =========================
-# Halaman Login
+# Sidebar untuk Admin/Guru
 # =========================
-def login_page():
-    init_db()
-    set_bg()
-    logo_path = "assets/img/logo.png"
+def sidebar_menu_admin():
+    with st.sidebar:
+        st.image("assets/img/logo.png", use_container_width=True)
+        st.markdown("### 📂 Dataset")
+        uploaded_file = st.file_uploader("Upload file CSV/XLSX", type=["csv","xls","xlsx"])
 
-    st.markdown("""
-    <style>
-    .login-box {
-        background: rgba(255,255,255,0.9);
-        border-radius: 16px;
-        padding: 30px;
-        width: 330px;
-        margin: auto;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.35);
-    }
-    .login-title {
-        font-size: 22px;
-        font-weight: bold;
-        margin-bottom: 15px;
-        text-align: center;
-    }
-    .stButton>button {
-        width: 100% !important;
-        border-radius: 8px;
-        padding: 10px;
-        background: linear-gradient(135deg,#1f1f1f,#3a3a3a);
-        color: white;
-        border: none;
-    }
-    .stButton>button:hover {
-        background: linear-gradient(135deg,#52b87d,#3bb371);
-    }
-    </style>
-    """, unsafe_allow_html=True)
+        # Hapus dataset lama saat tidak ada file
+        if uploaded_file is None and "dataset" in st.session_state:
+            del st.session_state["dataset"]
 
-    col1, col2 = st.columns([1,1])
-    with col1:
-        st.image(logo_path, width=160)
-        st.markdown("<h3 style='color:white'>Sistem Prediksi Kelulusan Siswa</h3>", unsafe_allow_html=True)
-        st.markdown("<p style='color:white'>SMK Ma'arif NU 01 Karangkobar</p>", unsafe_allow_html=True)
+        # Proses upload file
+        if uploaded_file is not None:
+            try:
+                raw = pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv") else pd.read_excel(uploaded_file)
+                df = normalize_dataset(raw)
 
-    with col2:
-        st.markdown("<div class='login-title'>🔑 Login </div>", unsafe_allow_html=True)
+                # Backup dataset lama
+                backup_dataset()
 
-        with st.form("login_form", clear_on_submit=False):
-            username = st.text_input("👤 Nama / Username")
-            password = st.text_input("🔒 Password / NIS", type="password")
-            submitted = st.form_submit_button("Masuk")
+                # Simpan dataset baru
+                st.session_state["dataset"] = df.copy()
+                save_dataset_to_db(df)
+                st.success("✅ Dataset berhasil diunggah dan tersimpan ke DB")
+            except Exception as e:
+                st.error(f"❌ Gagal memproses file: {e}")
+        else:
+            # Load dataset dari DB jika session_state belum ada
+            if "dataset" not in st.session_state:
+                db_df = load_dataset_from_db()
+                if db_df is not None:
+                    st.session_state["dataset"] = db_df
+            if "dataset" not in st.session_state:
+                st.info("Belum ada file diunggah.")
 
-            if submitted:
-                user = check_login(username, password)
-                if user:
-                    st.session_state.logged_in = True
-                    st.session_state.role = user["role"]
-                    st.session_state.username = user["username"]
-                    if user["role"] == "Siswa":
-                        st.session_state.nis = user["nis"]
-                    st.success(f"✅ Login berhasil sebagai {user['role']}!")
-                    st.rerun()
+        st.markdown("---")
+        menu = [
+            "🏠 Dashboard","👨‍🎓 Data Siswa","👨‍🏫 Data Guru",
+            "📑 Rapor","📊 Statistik","🤖 Prediksi Kelulusan","🚪 Logout"
+        ]
+        return st.radio("Navigasi", menu, label_visibility="collapsed")
+
+# =========================
+# Sidebar untuk Siswa
+# =========================
+def sidebar_menu_siswa():
+    with st.sidebar:
+        st.image("assets/img/logo.png", use_container_width=True)
+        menu = ["🤖 Prediksi Kelulusan","🚪 Logout"]
+        return st.radio("Navigasi", menu, label_visibility="collapsed")
+
+# =========================
+# Main
+# =========================
+def main():
+    st.set_page_config(page_title="Sistem Akademik", layout="wide")
+
+    if "logged_in" not in st.session_state or not st.session_state.logged_in:
+        login_show()
+        return
+
+    role = st.session_state.get("role", "")
+
+    # ================= Siswa =================
+    if role == "Siswa":
+        choice = sidebar_menu_siswa()
+        if choice == "🤖 Prediksi Kelulusan":
+            df = load_dataset_from_db()
+            if df is not None:
+                st.session_state["dataset"] = df
+                nama = st.session_state.get("nama", "").strip()
+                nis = str(st.session_state.get("nis", "")).strip()
+
+                # Pastikan Nama & NIS cocok (case-insensitive)
+                df_siswa = df[
+                    (df["Nama"].astype(str).str.strip().str.lower() == nama.lower()) &
+                    (df["NIS"].astype(str).str.strip() == nis)
+                ]
+
+                if not df_siswa.empty:
+                    st.subheader("📊 Nilai & Hasil Prediksi Anda")
+                    st.dataframe(df_siswa, use_container_width=True)
+
+                    # Tampilkan juga hasil prediksi model
+                    try:
+                        prediksi.show_siswa(df_siswa)
+                    except:
+                        st.warning("⚠️ Modul prediksi belum siap.")
                 else:
                     st.error("❌ Nama / NIS tidak terdaftar!")
+            else:
+                st.warning("⚠️ Dataset belum tersedia, silakan hubungi Admin/Guru.")
+        elif choice == "🚪 Logout":
+            if "dataset" in st.session_state: del st.session_state["dataset"]
+            logout()
 
-        st.markdown("</div>", unsafe_allow_html=True)
+    # ================= Admin / Guru =================
+    else:
+        choice = sidebar_menu_admin()
+        if choice == "🏠 Dashboard":
+            dashboard.show()
+        elif choice == "👨‍🎓 Data Siswa":
+            # 🔥 Panggil CRUD siswa
+            data_siswa.show()
+        elif choice == "👨‍🏫 Data Guru":
+            data_guru.show()
+        elif choice == "📑 Rapor":
+            rapor.show()
+        elif choice == "📊 Statistik":
+            statistik.show()
+        elif choice == "🤖 Prediksi Kelulusan":
+            if "dataset" in st.session_state:
+                prediksi.show()
+            else:
+                st.warning("⚠️ Dataset belum tersedia, silakan unggah terlebih dahulu.")
+        elif choice == "🚪 Logout":
+            if "dataset" in st.session_state: del st.session_state["dataset"]
+            logout()
 
-# =========================
-# Ekspor fungsi
-# =========================
-def show():
-    login_page()
-
-def logout():
-    st.session_state.logged_in = False
-    st.session_state.username = None
-    st.session_state.role = None
-    if "nis" in st.session_state:
-        del st.session_state["nis"]
-    st.success("✅ Logout berhasil")
-    st.rerun()
+if __name__ == "__main__":
+    main()
