@@ -1,223 +1,124 @@
-# views/prediksi.py
-# ==========================================================
-# Modul Prediksi Kelulusan Siswa
-# Streamlit + Scikit-Learn + Altair + FPDF
-# ==========================================================
+# views/data_guru.py
 import streamlit as st
 import pandas as pd
-import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-import altair as alt
-from fpdf import FPDF
+import sqlite3
 
-# ===================== PDF GENERATOR =====================
-def generate_pdf(lulus, tidak_lulus, threshold, eval_df, kelas_name="Rapor"):
-    pdf = FPDF("P", "mm", "A4")
-    pdf.add_page()
-    pdf.set_font("Arial", "", 12)
+DB_FILE = "database.db"
 
-    # Header
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 8, f"Prediksi Kelulusan - {kelas_name}", ln=1, align="C")
-    pdf.ln(4)
-    pdf.set_font("Arial", "", 12)
+# =============================
+# DATABASE FUNCTIONS
+# =============================
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS guru (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nama TEXT NOT NULL,
+            mapel TEXT NOT NULL,
+            status TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
 
-    # Threshold
-    pdf.cell(0, 8, f"Threshold Kelulusan: {threshold}", ln=1, align="L")
-    pdf.ln(4)
+def tambah_guru(nama, mapel, status):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("INSERT INTO guru (nama, mapel, status) VALUES (?, ?, ?)", (nama, mapel, status))
+    conn.commit()
+    conn.close()
 
-    # Evaluasi Model
-    if not eval_df.empty:
-        pdf.cell(0, 8, "Evaluasi Model", ln=1, align="L")
-        for _, row in eval_df.iterrows():
-            pdf.cell(0, 6, f"{row['Metrik']}: {row['Skor']:.2f}", ln=1, align="L")
-        pdf.ln(4)
+def get_guru():
+    conn = sqlite3.connect(DB_FILE)
+    df = pd.read_sql("SELECT * FROM guru", conn)
+    conn.close()
+    return df
 
-    # Fungsi cetak tabel
-    def print_table(df_table, title):
-        pdf.set_font("Arial", "B", 12)
-        pdf.cell(0, 8, title, ln=1, align="C")
-        pdf.ln(2)
-        pdf.set_font("Arial", "", 12)
+def hapus_guru(guru_id):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("DELETE FROM guru WHERE id=?", (guru_id,))
+    conn.commit()
+    conn.close()
 
-        if not df_table.empty:
-            col_names = df_table.columns.tolist()
-            page_width = pdf.w - 2 * pdf.l_margin
-            col_widths = []
-            for c in col_names:
-                if c.lower() == "nis":
-                    col_widths.append(20)
-                elif c.lower() == "nama":
-                    col_widths.append(80)
+def update_guru(guru_id, nama, mapel, status):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("UPDATE guru SET nama=?, mapel=?, status=? WHERE id=?", (nama, mapel, status, guru_id))
+    conn.commit()
+    conn.close()
+
+# =============================
+# STREAMLIT UI
+# =============================
+def show():
+    st.markdown("## 👩‍🏫 Manajemen Data Guru")
+    init_db()
+
+    # =============================
+    # FORM TAMBAH GURU
+    # =============================
+    with st.expander("➕ Tambah Guru Baru", expanded=True):
+        with st.form("form_tambah_guru", clear_on_submit=True):
+            nama = st.text_input("Nama Guru")
+            mapel = st.text_input("Mata Pelajaran")
+            status = st.selectbox("Status", ["Produktif", "Honorer", "Tetap"])
+            submit = st.form_submit_button("Simpan Guru")
+
+            if submit:
+                if nama and mapel:
+                    tambah_guru(nama, mapel, status)
+                    st.success(f"Guru **{nama}** berhasil ditambahkan.")
+                    # set flag agar dashboard tahu ada perubahan
+                    st.session_state["reload_guru"] = True
                 else:
-                    col_widths.append((page_width - 100) / (len(col_names) - 2))
-            # Header kolom
-            for i, h in enumerate(col_names):
-                pdf.cell(col_widths[i], 8, str(h), 1, 0, "C")
-            pdf.ln()
-            # Rows
-            for _, r in df_table.iterrows():
-                for i, c in enumerate(col_names):
-                    pdf.cell(col_widths[i], 8, str(r[c]), 1, 0, "L")
-                pdf.ln()
-        else:
-            pdf.cell(0, 8, "Tidak ada data", ln=1, align="L")
-        pdf.ln(4)
+                    st.error("Nama dan Mapel wajib diisi!")
 
-    print_table(lulus, "Daftar Siswa Lulus")
-    print_table(tidak_lulus, "Daftar Siswa Tidak Lulus")
+    st.markdown("---")
 
-    pdf_bytes = bytes(pdf.output(dest="S"))
-    return pdf_bytes
+    # =============================
+    # TABEL DAFTAR GURU
+    # =============================
+    st.subheader("📋 Daftar Guru")
+    df = get_guru()
 
+    if not df.empty:
+        for i, row in df.iterrows():
+            edit_key = f"edit_{row['id']}"
+            delete_key = f"delete_{row['id']}"
 
-# ===================== SHOW FUNCTION =====================
-def show(dataset=None, role="admin", nis=None, nama=None):
-    st.title("🎯 Prediksi Kelulusan Siswa")
+            if "edit_id" in st.session_state and st.session_state["edit_id"] == row["id"]:
+                # MODE EDIT
+                with st.form(f"form_edit_{row['id']}"):
+                    nama_edit = st.text_input("Nama Guru", value=row["nama"])
+                    mapel_edit = st.text_input("Mata Pelajaran", value=row["mapel"])
+                    status_edit = st.selectbox("Status", ["Produktif","Honorer","Tetap"],
+                                               index=["Produktif","Honorer","Tetap"].index(row["status"]))
+                    simpan_edit = st.form_submit_button("💾 Simpan Perubahan")
+                    batal_edit = st.form_submit_button("❌ Batal")
 
-    # Dataset
-    if dataset is None:
-        if "dataset" not in st.session_state:
-            st.error("❌ Dataset belum diupload.")
-            return
-        df = st.session_state["dataset"].copy()
+                    if simpan_edit:
+                        update_guru(row["id"], nama_edit, mapel_edit, status_edit)
+                        st.success(f"Guru **{nama_edit}** berhasil diperbarui.")
+                        del st.session_state["edit_id"]
+                        st.session_state["reload_guru"] = True
+                    if batal_edit:
+                        del st.session_state["edit_id"]
+
+            else:
+                # MODE TAMPIL DATA
+                c1, c2, c3, c4, c5 = st.columns([3,3,2,1,1])
+                with c1: st.write(row["nama"])
+                with c2: st.write(row["mapel"])
+                with c3: st.write(row["status"])
+                with c4:
+                    if st.button("✏️", key=edit_key):
+                        st.session_state["edit_id"] = row["id"]
+                with c5:
+                    if st.button("🗑️", key=delete_key):
+                        hapus_guru(row["id"])
+                        st.success(f"Guru **{row['nama']}** berhasil dihapus.")
+                        st.session_state["reload_guru"] = True
     else:
-        df = dataset.copy()
-
-    # Filter untuk siswa
-    if role == "siswa":
-        if nis:
-            df = df[df["NIS"].astype(str) == str(nis)]
-        elif nama:
-            df = df[df["Nama"].str.upper() == str(nama).upper()]
-
-        if df.empty:
-            st.error("❌ Nama / NIS tidak terdaftar!")
-            return
-        else:
-            st.success(f"✅ Selamat datang, {df.iloc[0]['Nama']}")
-
-    # ===================== Pilih kolom mapel =====================
-    mapel_cols = ["MTK", "BINDO", "BINGGRIS", "IPA", "IPS"]
-    nilai_cols = [c for c in mapel_cols if c in df.columns]
-
-    if not nilai_cols:
-        st.error("❌ Dataset tidak memiliki kolom mapel yang valid.")
-        return
-
-    # Hitung rata-rata hanya dari kolom mapel
-    df["Rata-rata"] = df[nilai_cols].mean(axis=1)
-
-    # Bonus ekstra
-    def bonus_ekstra(row):
-        if "EKSTRA" not in row:
-            return 0
-        if str(row["EKSTRA"]).upper() == "B":
-            return 65
-        elif str(row["EKSTRA"]).upper() == "SB":
-            return 70
-        return 0
-
-    df["Bonus_Ekstra"] = df.apply(bonus_ekstra, axis=1)
-    df["Rata-rata_Final"] = df["Rata-rata"] + df["Bonus_Ekstra"]
-
-    # Threshold slider (Admin bisa atur, siswa hanya lihat default)
-    if role == "admin":
-        threshold = st.slider("🎚️ Threshold Kelulusan", 0, 200, 75)
-    else:
-        threshold = 75
-        st.info(f"🎚️ Threshold Kelulusan: {threshold}")
-
-    df["Target"] = np.where(df["Rata-rata_Final"] >= threshold, 1, 0)
-
-    # Override jika alpa > 7
-    if "Alpa" in df.columns:
-        df.loc[df["Alpa"] > 7, "Target"] = 0
-        df_alpha_warn = df[df["Alpa"] > 7]
-        if not df_alpha_warn.empty and "Nama" in df_alpha_warn.columns and role == "siswa":
-            st.warning("⚠️ Anda memiliki alpha > 7. Silahkan hubungi guru BK.")
-
-    # ================= Model Random Forest =================
-    X = df[nilai_cols]
-    y = df["Target"]
-
-    eval_df = pd.DataFrame()
-    if len(y.unique()) > 1 and role == "admin":
-        min_count = y.value_counts().min()
-        if min_count >= 2:
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.3, random_state=42, stratify=y
-            )
-            model = RandomForestClassifier(random_state=42)
-            model.fit(X_train, y_train)
-            y_pred = model.predict(X_test)
-
-            eval_df = pd.DataFrame({
-                "Metrik": ["Accuracy", "Precision", "Recall", "F1-Score"],
-                "Skor": [
-                    accuracy_score(y_test, y_pred),
-                    precision_score(y_test, y_pred, zero_division=0),
-                    recall_score(y_test, y_pred, zero_division=0),
-                    f1_score(y_test, y_pred, zero_division=0)
-                ]
-            })
-
-            st.subheader("📊 Evaluasi Model (Random Forest)")
-            st.dataframe(eval_df, use_container_width=True)
-            chart_eval = alt.Chart(eval_df).mark_line(color="red", point=True).encode(
-                x="Metrik", y="Skor"
-            ).properties(width=600, height=300, title="Evaluasi Model - Random Forest")
-            st.altair_chart(chart_eval, use_container_width=True)
-
-    # ================= Hasil Prediksi =================
-    st.subheader("📋 Hasil Prediksi Kelulusan")
-    lulus = df[df["Target"] == 1][["NIS", "Nama", "Rata-rata_Final", "Bonus_Ekstra"]] if "Nama" in df.columns else df[df["Target"] == 1][["Rata-rata_Final", "Bonus_Ekstra"]]
-    tidak_lulus = df[df["Target"] == 0][["NIS", "Nama", "Rata-rata_Final", "Bonus_Ekstra"]] if "Nama" in df.columns else df[df["Target"] == 0][["Rata-rata_Final", "Bonus_Ekstra"]]
-
-    if role == "admin":
-        # Ringkasan jumlah
-        summary_df = pd.DataFrame({
-            "Status": ["Lulus", "Tidak Lulus"],
-            "Jumlah": [len(lulus), len(tidak_lulus)]
-        })
-
-        # Grafik jumlah kelulusan
-        chart_summary = alt.Chart(summary_df).mark_bar().encode(
-            x="Status",
-            y="Jumlah",
-            color=alt.Color("Status", scale=alt.Scale(range=["green", "red"]))
-        ).properties(width=400, height=300, title="Distribusi Kelulusan")
-        st.altair_chart(chart_summary, use_container_width=True)
-
-        # Grafik distribusi nilai
-        chart_nilai = alt.Chart(df).mark_bar(color="blue").encode(
-            alt.X("Rata-rata_Final", bin=alt.Bin(maxbins=20), title="Rata-rata Final"),
-            y="count()"
-        ).properties(width=600, height=300, title="Distribusi Nilai Rata-rata Final")
-        st.altair_chart(chart_nilai, use_container_width=True)
-
-    # Tabel hasil
-    if role == "admin":
-        st.success("✅ Daftar Siswa Lulus")
-        st.dataframe(lulus, use_container_width=True)
-        st.error("❌ Daftar Siswa Tidak Lulus")
-        st.dataframe(tidak_lulus, use_container_width=True)
-    else:
-        if not lulus.empty:
-            st.success("🎉 Anda dinyatakan LULUS!")
-        else:
-            st.error("❌ Anda dinyatakan TIDAK LULUS!")
-
-    # Download PDF hanya admin
-    if role == "admin":
-        kelas_name = st.text_input("Nama Kelas / File", "Kelas")
-        if st.button("📥 Download PDF Hasil Prediksi"):
-            pdf_bytes = generate_pdf(lulus, tidak_lulus, threshold, eval_df, kelas_name)
-            st.download_button(
-                label="Download PDF",
-                data=pdf_bytes,
-                file_name=f"{kelas_name}_Prediksi.pdf",
-                mime="application/pdf"
-            )
+        st.info("Belum ada data guru.")
