@@ -81,20 +81,22 @@ def show():
     # Hapus duplikat kolom
     df = df.loc[:, ~df.columns.duplicated()]
 
-    # Tentukan kolom nilai mapel
-    exclude_cols = ["no", "nisn", "sakit", "izin", "alpa"]
-    nilai_cols = [c for c in df.select_dtypes(include="number").columns if c.lower() not in exclude_cols]
+    # Tentukan kolom nilai mapel (tanpa kolom identitas/absensi)
+    exclude_cols = ["no", "nis", "nisn", "sakit", "izin", "alpa"]
+    nilai_cols = [
+        c for c in df.select_dtypes(include="number").columns
+        if c.lower() not in exclude_cols
+    ]
 
-    # Tambah rata-rata
+    # Tambah rata-rata hanya dari mapel
     if "Rata-rata" not in df.columns and nilai_cols:
         df["Rata-rata"] = df[nilai_cols].mean(axis=1)
 
-    # Kolom ditampilkan
+    # Tentukan kolom untuk ditampilkan
     display_cols = []
-    if "NIS" in df.columns:
-        display_cols.append("NIS")
-    if "Nama" in df.columns:
-        display_cols.append("Nama")
+    for col in ["NIS", "NISN", "Nama", "Kelas"]:
+        if col in df.columns:
+            display_cols.append(col)
     display_cols += nilai_cols
     if "Rata-rata" in df.columns:
         display_cols.append("Rata-rata")
