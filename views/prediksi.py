@@ -65,7 +65,8 @@ def generate_pdf(lulus, tidak_lulus, threshold, eval_df, kelas_name="Rapor"):
             # Rows
             for _, r in df_table.iterrows():
                 for i, c in enumerate(col_names):
-                    pdf.cell(col_widths[i], 8, str(r[c]), 1, 0, "L")
+                    value = str(r[c])
+                    pdf.cell(col_widths[i], 8, value, 1, 0, "L")
                 pdf.ln()
         else:
             pdf.cell(0, 8, "Tidak ada data", ln=1, align="L")
@@ -98,13 +99,13 @@ def generate_pdf_siswa(nama, nis, rata2, bonus, status, threshold, alpa=None):
 
     if status == 1:
         pdf.set_text_color(0, 128, 0)
-        pdf.cell(0, 10, "🎉 Anda dinyatakan LULUS!", ln=1)
+        pdf.cell(0, 10, "Anda dinyatakan LULUS!", ln=1)
     else:
         pdf.set_text_color(200, 0, 0)
-        pdf.cell(0, 10, "❌ Anda dinyatakan TIDAK LULUS!", ln=1)
-        if alpa is not None and alpa > 5:
+        pdf.cell(0, 10, "Anda dinyatakan TIDAK LULUS!", ln=1)
+        if alpa is not None and alpa > threshold:
             pdf.set_text_color(200, 0, 0)
-            pdf.cell(0, 10, "⚠️ Catatan: Alpa > 5. Harap menemui Guru BK.", ln=1)
+            pdf.cell(0, 10, "Catatan: Alpa melebihi batas, hubungi Guru BK dan wali kelas.", ln=1)
     pdf.set_text_color(0, 0, 0)
 
     pdf_bytes = bytes(pdf.output(dest="S"))
@@ -145,17 +146,17 @@ def show(dataset=None, role="admin", nis=None, nama=None):
         st.error("❌ Dataset tidak memiliki kolom mapel yang valid.")
         return
 
-    # Hitung rata-rata hanya dari kolom mapel
+    # Hitung rata-rata mapel
     df["Rata-rata"] = df[nilai_cols].mean(axis=1)
 
-    # Bonus ekstra
+    # Bonus ekstra (B=60, SB=65)
     def bonus_ekstra(row):
         if "EKSTRA" not in row:
             return 0
         if str(row["EKSTRA"]).upper() == "B":
-            return 65
+            return 60
         elif str(row["EKSTRA"]).upper() == "SB":
-            return 70
+            return 65
         return 0
 
     df["Bonus_Ekstra"] = df.apply(bonus_ekstra, axis=1)
@@ -171,13 +172,12 @@ def show(dataset=None, role="admin", nis=None, nama=None):
     df["Target"] = np.where(df["Rata-rata_Final"] >= threshold, 1, 0)
     df["Keterangan"] = ""
 
-    # Override jika alpa > 5
+    # ==========================================================
+    # Override jika alpa > 5 → beri keterangan & set Target = 0
+    # ==========================================================
     if "Alpa" in df.columns:
         df.loc[df["Alpa"] > 5, "Target"] = 0
-        df.loc[df["Alpa"] > 5, "Keterangan"] = "⚠️ Harap menemui Guru BK"
-        df_alpha_warn = df[df["Alpa"] > 5]
-        if not df_alpha_warn.empty and "Nama" in df_alpha_warn.columns and role == "siswa":
-            st.warning("⚠️ Anda memiliki Alpa > 5. Silahkan hubungi guru BK.")
+        df.loc[df["Alpa"] > 5, "Keterangan"] = "Hubungi guru BK dan wali kelas"
 
     # ================= Model Random Forest =================
     X = df[nilai_cols]
@@ -255,12 +255,12 @@ def show(dataset=None, role="admin", nis=None, nama=None):
         else:
             st.error("❌ Anda dinyatakan TIDAK LULUS!")
             if "Alpa" in row and row["Alpa"] > 5:
-                st.warning("⚠️ Karena Alpa > 5, harap menemui Guru BK.")
+                st.warning("⚠️ Karena Alpa melebihi batas, harap menemui Guru BK dan wali kelas.")
 
         # Download PDF pribadi
         if st.button("📥 Download Hasil Prediksi Saya (PDF)"):
             pdf_bytes = generate_pdf_siswa(
-                row["Nama"], row["NIS"], row["Rata-rata_Final"],
+                row["Nama"], row["NIS"], row["Rata-rata"],
                 row["Bonus_Ekstra"], row["Target"], threshold, row.get("Alpa", None)
             )
             st.download_button(
