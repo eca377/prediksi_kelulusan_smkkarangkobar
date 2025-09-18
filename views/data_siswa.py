@@ -136,7 +136,7 @@ def show():
             submitted = st.form_submit_button("Tambah")
             if submitted:
                 add_siswa(nis, nama, kelas)
-                st.experimental_rerun()
+                st.rerun()   # ✅ perbaikan
 
         if not df.empty:
             siswa_id = st.selectbox("Pilih ID Siswa untuk Edit/Hapus", df["id"])
@@ -154,7 +154,7 @@ def show():
 
                 if update_btn:
                     update_siswa(siswa_id, nis, nama, kelas)
-                    st.experimental_rerun()
+                    st.rerun()   # ✅ perbaikan
                 if delete_btn:
                     delete_siswa(siswa_id)
-                    st.experimental_rerun()
+                    st.rerun()   # ✅ perbaikan
